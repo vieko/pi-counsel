@@ -42,7 +42,17 @@ jobs:
             exit 1
           fi
       # OIDC trusted publishing: no NODE_AUTH_TOKEN, no OTP; provenance is automatic.
-      - run: npm publish
+      # Skip when the version is already on the registry (v0.1.0 was published
+      # by hand before the trusted publisher existed) so the tag still gets
+      # its GitHub release.
+      - run: |
+          pkg="$(node -p 'require("./package.json").name')"
+          ver="$(node -p 'require("./package.json").version')"
+          if npm view "$pkg@$ver" version >/dev/null 2>&1; then
+            echo "$pkg@$ver already published; skipping npm publish"
+          else
+            npm publish
+          fi
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
