@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { DEFAULT_SETTINGS, parseEnvOverride, parseModelRef, parseSettings } from "../extensions/pi-counsel/settings.ts";
+
+describe("parseSettings", () => {
+	it("falls back per field", () => {
+		const s = parseSettings({ provider: "anthropic", effort: "loud", maxTokens: 10, maxSpendPerSession: -1, enabled: "yes" });
+		assert.equal(s.provider, "anthropic");
+		assert.equal(s.model, DEFAULT_SETTINGS.model);
+		assert.equal(s.effort, DEFAULT_SETTINGS.effort);
+		assert.equal(s.maxTokens, DEFAULT_SETTINGS.maxTokens);
+		assert.equal(s.maxSpendPerSession, DEFAULT_SETTINGS.maxSpendPerSession);
+		assert.equal(s.enabled, DEFAULT_SETTINGS.enabled);
+	});
+
+	it("returns defaults for garbage", () => {
+		assert.deepEqual(parseSettings(null), DEFAULT_SETTINGS);
+		assert.deepEqual(parseSettings("x"), DEFAULT_SETTINGS);
+	});
+
+	it("accepts zero budgets (tool always declines)", () => {
+		assert.equal(parseSettings({ maxConsultsPerSession: 0 }).maxConsultsPerSession, 0);
+	});
+});
+
+describe("parseModelRef", () => {
+	it("splits provider from a slashed model id and an effort suffix", () => {
+		assert.deepEqual(parseModelRef("vercel-ai-gateway/anthropic/claude-fable-5.1:high"), {
+			provider: "vercel-ai-gateway",
+			model: "anthropic/claude-fable-5.1",
+			effort: "high",
+		});
+		assert.deepEqual(parseModelRef("anthropic/claude-opus-5.5"), { provider: "anthropic", model: "claude-opus-5.5", effort: undefined });
+	});
+
+	it("keeps colons that are not effort levels", () => {
+		assert.deepEqual(parseModelRef("ollama/llama3:70b"), { provider: "ollama", model: "llama3:70b", effort: undefined });
+	});
+
+	it("rejects refs without a provider", () => {
+		assert.equal(parseModelRef("claude-opus-5.5"), undefined);
+		assert.equal(parseModelRef("/x"), undefined);
+		assert.equal(parseModelRef("x/"), undefined);
+	});
+});
+
+describe("parseEnvOverride", () => {
+	it("maps off/on/model", () => {
+		assert.deepEqual(parseEnvOverride("off"), { kind: "off" });
+		assert.deepEqual(parseEnvOverride("0"), { kind: "off" });
+		assert.equal(parseEnvOverride("on"), undefined);
+		assert.equal(parseEnvOverride(undefined), undefined);
+		assert.equal(parseEnvOverride(""), undefined);
+		assert.deepEqual(parseEnvOverride("anthropic/claude-opus-5.5:max"), { kind: "model", provider: "anthropic", model: "claude-opus-5.5", effort: "max" });
+		assert.equal(parseEnvOverride("nonsense"), undefined);
+	});
+});
