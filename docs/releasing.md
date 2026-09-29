@@ -7,7 +7,7 @@ with provenance), and cuts the GitHub release.
 
 ## One-time setup (npmjs.com)
 
-The package must exist on the registry first (v0.1.0 was published manually).
+The package must exist on the registry first (v0.1.0 was published manually on 2026-09-29).
 Then configure the trusted publisher once, on the package:
 
 - npmjs.com → **pi-counsel** → Settings → **Trusted Publisher** → GitHub Actions
