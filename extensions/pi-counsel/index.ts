@@ -21,7 +21,7 @@ import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { consult, CounselError, resolveCounselModel, TOOL_NAME, type ConsultProgress } from "./consult.ts";
 import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.ts";
-import { type CounselSettings, type Effort, EFFORTS, loadFileSettings, loadSettings, modelKey, parseEnvOverride, parseModelRef, saveSettings, SETTINGS_PATH } from "./settings.ts";
+import { type CounselSettings, type Effort, EFFORTS, loadFileSettings, loadSettings, modelKey, parseEnvOverride, parseModelRef, saveSettings, sessionNote, SETTINGS_PATH } from "./settings.ts";
 
 const BUDGET_ENTRY = "counsel_budget";
 const RECORD_ENTRY = "counsel";
@@ -270,7 +270,8 @@ export default function counselExtension(pi: ExtensionAPI) {
 			} catch (err) {
 				parts.push(err instanceof Error ? err.message : String(err));
 			}
-			if (ctx.model && ctx.model.provider === settings.provider && ctx.model.id === settings.model) parts.push("same model as the session: a fresh read, not a stronger one");
+			const note = sessionNote(ctx.model, settings);
+			if (note) parts.push(note);
 		}
 		if (envOverride?.kind === "model") parts.push("model set by PI_COUNSEL for this process");
 		return `counsel: ${parts.join(" · ")}`;

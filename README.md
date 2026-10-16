@@ -95,6 +95,13 @@ declines and tells the agent to carry on with its own judgement, and
 - **Same model.** Counsel can be the session model. `/counsel status` says
   so; the value is a fresh read without the executor's sunk cost, not a
   stronger one.
+- **Same family.** A counsel from the session model's lab (Fable reviewing
+  Opus) shares its training and its blind spots, and models tend to rate
+  their own family's work higher. A comparably strong model from another
+  lab is more likely to disagree where the executor is wrong. `/counsel
+  status` notes a same-family pair. The cost is privacy: the transcript
+  then goes to a second provider. A weaker cross-family model adds noise,
+  not independence.
 - **Routing.** Requests go through `modelRegistry.streamSimple()`, outside
   Pi's agent loop, so `before_provider_request` handlers do not see them.
   For `vercel-ai-gateway` models with `compat.vercelGatewayRouting` in
