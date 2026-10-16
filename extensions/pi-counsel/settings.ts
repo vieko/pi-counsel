@@ -132,3 +132,50 @@ export function saveSettings(settings: CounselSettings): boolean {
 }
 
 export const modelKey = (s: Pick<CounselSettings, "provider" | "model">): string => `${s.provider}/${s.model}`;
+
+const FAMILY_HINTS: readonly [RegExp, string][] = [
+	[/claude|anthropic/, "anthropic"],
+	[/(^|[/.])(gpt|o\d|codex)|openai/, "openai"],
+	[/gemini|gemma|google/, "google"],
+	[/grok|xai/, "xai"],
+	[/llama|meta/, "meta"],
+	[/mistral|codestral|devstral/, "mistral"],
+	[/deepseek/, "deepseek"],
+	[/qwen|alibaba/, "alibaba"],
+	[/kimi|moonshot/, "moonshot"],
+	[/glm|zai/, "zai"],
+];
+
+/**
+ * The lab behind a model, guessed from its id and provider. Gateways and
+ * routers carry no vendor in the provider name, so the id is checked first.
+ * Undefined when nothing matches: no note beats a wrong one.
+ */
+export function modelFamily(provider: string, model: string): string | undefined {
+	for (const text of [model.toLowerCase(), provider.toLowerCase()]) {
+		for (const [pattern, family] of FAMILY_HINTS) if (pattern.test(text)) return family;
+	}
+	return undefined;
+}
+
+/** How counsel relates to the session model, when that limits the review. */
+export function sessionNote(session: { provider: string; id: string } | undefined, counsel: Pick<CounselSettings, "provider" | "model">): string | undefined {
+	if (!session) return undefined;
+	if (session.provider === counsel.provider && session.id === counsel.model) return "same model as the session: a fresh read, not a stronger one";
+	const family = modelFamily(counsel.provider, counsel.model);
+	if (family && family === modelFamily(session.provider, session.id)) return `same family as the session (${family}): blind spots overlap; another family gives a more independent read`;
+	return undefined;
+}
+
+/**
+ * Settings for one consult with the tool's `model` argument applied. The
+ * file and the process settings stay as they were. An effort the argument
+ * omits keeps the configured one; consult() clamps it to the model.
+ */
+export function withModelOverride(settings: CounselSettings, ref: string | undefined): CounselSettings | { error: string } {
+	const raw = ref?.trim();
+	if (!raw) return settings;
+	const parsed = parseModelRef(raw);
+	if (!parsed) return { error: `"${raw}" is not provider/model[:effort], for example vercel-ai-gateway/openai/<model>:high` };
+	return { ...settings, provider: parsed.provider, model: parsed.model, effort: parsed.effort ?? settings.effort };
+}

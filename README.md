@@ -28,13 +28,17 @@ an approach has stalled after two attempts, before declaring multi-step work
 done, or when the user asks. Not for routine steps.
 
 A consult serialises the session (compaction summary, user messages,
-assistant text, tool calls with clipped arguments, tool results with clipped
-bodies, images as placeholders) into one message per entry, redacts obvious
-secrets, sizes it to the counsel model's context window (eliding the middle,
-keeping the opening and the recent tail), and streams the answer. The tool
-result carries the counsel model's usage, so `/session` and the footer
-include it; a `counsel` session entry records model, cost, duration and the
-verdict line for later analysis.
+assistant text, tool calls and their arguments, tool results, images as
+placeholders) into one message per entry, redacts obvious secrets, and sizes
+it to the counsel model's context window. Sizing uses the loosest clip that
+fits: a session that fits is read nearly whole (tool results up to 50K
+characters each), and long ones step down to 20K, 8K, then 3K per result
+before entries are elided from the middle, keeping the opening and the
+recent tail. The answer streams back with a last line naming the model,
+effort, duration, cost and transcript size. The tool result carries the
+counsel model's usage, so `/session` and the footer include it; a `counsel`
+session entry records model, cost, duration, the clip used and the verdict
+line for later analysis.
 
 Counsel has no tools and takes no actions. Its advice comes back as the tool
 result and the executor decides what to adopt.
@@ -52,7 +56,11 @@ result and the executor decides what to adopt.
 | `/counsel more` | Raise this session's budget by one more allowance |
 
 In a prompt, "consult counsel before you continue" works the way it does with
-any tool.
+any tool. The tool also takes an optional `model` (`provider/model[:effort]`)
+for one consult, so "have counsel review with an OpenAI model" works without
+changing the configured counsel. That consult counts against the same budget.
+If the model does not resolve, the error lists available models from the
+same family.
 
 ## Configure
 
@@ -86,8 +94,9 @@ declines and tells the agent to carry on with its own judgement, and
 - **Cost.** Each consult reads the transcript at the counsel model's price;
   at 200K tokens on a frontier model that is a few dollars. The result line
   shows tokens, dollars, cache hit rate, and budget used. Consecutive
-  consults share a byte-identical prefix, so a provider prompt cache can
-  reuse most of it.
+  consults share a byte-identical prefix while the clip tier holds, so a
+  provider prompt cache can reuse most of it; the prefix changes once when
+  a growing session drops to a tighter tier.
 - **Privacy.** The transcript goes to the counsel model's provider. When
   that is the same provider as the session, nothing new is exposed. Redaction
   (API-key shapes, bearer tokens, `KEY=`/`TOKEN=` assignments, credentials
@@ -95,6 +104,13 @@ declines and tells the agent to carry on with its own judgement, and
 - **Same model.** Counsel can be the session model. `/counsel status` says
   so; the value is a fresh read without the executor's sunk cost, not a
   stronger one.
+- **Same family.** A counsel from the session model's lab (Fable reviewing
+  Opus) shares its training and its blind spots, and models tend to rate
+  their own family's work higher. A comparably strong model from another
+  lab is more likely to disagree where the executor is wrong. `/counsel
+  status` notes a same-family pair; pass `model` for one cross-family consult. The cost is privacy: the transcript
+  then goes to a second provider. A weaker cross-family model adds noise,
+  not independence.
 - **Routing.** Requests go through `modelRegistry.streamSimple()`, outside
   Pi's agent loop, so `before_provider_request` handlers do not see them.
   For `vercel-ai-gateway` models with `compat.vercelGatewayRouting` in

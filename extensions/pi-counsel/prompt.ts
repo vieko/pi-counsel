@@ -18,6 +18,8 @@ Before a completion check, make the deliverable durable first (write the file, c
 
 Pass \`question\` when you want the reading focused ("is splitting this migration worth it?"); leave it empty for a general review of the approach and current state.
 
+Pass \`model\` (provider/model[:effort]) when the user names a model or asks for a reviewer from a different model family. It applies to this consult only, under the same budget, and does not change the configured counsel. For a second opinion from another model, use this tool with \`model\`; do not start another agent or a \`pi -p\` run, which would review without the transcript and with tools.
+
 Counsel's advice is guidance. Adopt what the evidence supports; when a recommendation conflicts with what you have observed, say so rather than following it unconditionally.`;
 
 export const PROMPT_SNIPPET = "counsel: consult a stronger model on the approach before committing, when stuck, or before declaring done";

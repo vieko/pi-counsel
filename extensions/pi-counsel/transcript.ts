@@ -8,9 +8,14 @@
  * across consults and a provider prompt cache can reuse it.
  *
  * Sizing is model-aware: the caller passes a token budget derived from the
- * counsel model's context window, and the serialiser first trims tool bodies,
- * then elides whole entries from the middle, keeping the opening (the task)
- * and the tail (where the decision is).
+ * counsel model's context window. The serialiser picks the loosest clip tier
+ * whose total fits, so a session that fits is read nearly whole; only when
+ * the tightest tier does not fit does it elide whole entries from the
+ * middle, keeping the opening (the task) and the tail (where the decision
+ * is). A fixed 3,000-char clip let counsel see ~5K tokens of sessions whose
+ * reads ran to tens of thousands, and reviews then called the executor's
+ * code claims unverified. The tier changes only when the session outgrows
+ * it, so consecutive consults mostly keep a byte-identical prefix.
  *
  * This module imports nothing from pi so it can be lifted elsewhere.
  */
@@ -25,7 +30,7 @@ export interface SerializeOptions {
 	budgetTokens: number;
 	/** Tool calls to leave out, e.g. the in-flight counsel call itself. Their results are still rendered. */
 	skipToolCalls?: string[];
-	/** Per-entry caps, in characters. */
+	/** Per-entry caps, in characters. Setting any of them pins one tier instead of searching TIERS. */
 	maxToolArgsChars?: number;
 	maxToolResultChars?: number;
 	maxTextChars?: number;
@@ -41,6 +46,8 @@ export interface SerializeResult {
 	elidedEntries: number;
 	/** Entries considered before eliding. */
 	totalEntries: number;
+	/** Per-result clip that was used, in characters. */
+	maxToolResultChars: number;
 }
 
 // Loose shapes of what pi's session manager returns. Kept structural so the
@@ -68,11 +75,27 @@ export interface EntryLike {
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 
+interface Caps {
+	maxToolArgsChars: number;
+	maxToolResultChars: number;
+	maxTextChars: number;
+}
+
+/**
+ * Clip tiers, loosest first. The top tool-result cap matches pi's own 50 KB
+ * tool output limit, so in practice it does not clip. Arguments carry edit
+ * and write bodies, which a review of changes needs.
+ */
+export const TIERS: readonly Caps[] = [
+	{ maxToolResultChars: 50_000, maxToolArgsChars: 8_000, maxTextChars: 24_000 },
+	{ maxToolResultChars: 20_000, maxToolArgsChars: 4_000, maxTextChars: 16_000 },
+	{ maxToolResultChars: 8_000, maxToolArgsChars: 2_000, maxTextChars: 12_000 },
+	{ maxToolResultChars: 3_000, maxToolArgsChars: 1_500, maxTextChars: 12_000 },
+];
+
 const DEFAULTS = {
 	skipToolCalls: [] as string[],
-	maxToolArgsChars: 1_500,
-	maxToolResultChars: 3_000,
-	maxTextChars: 12_000,
+	...TIERS[TIERS.length - 1],
 	headFraction: 0.25,
 };
 
@@ -187,20 +210,27 @@ export function renderEntry(entry: EntryLike, opts: Required<Omit<SerializeOptio
  * and the tail (current state) survive; a marker says how much went.
  */
 export function serializeTranscript(entries: EntryLike[], options: SerializeOptions): SerializeResult {
-	const opts = { ...DEFAULTS, ...options };
-	const rendered = entries
-		.map((entry) => renderEntry(entry, opts).map(redact).join("\n\n"))
-		.filter((text) => text.length > 0);
-	const sizes = rendered.map(estimateTokens);
-	const total = sizes.reduce((a, b) => a + b, 0);
-
-	if (total <= opts.budgetTokens) {
-		return {
-			messages: rendered.map((content) => ({ role: "user", content })),
-			tokens: total,
-			elidedEntries: 0,
-			totalEntries: rendered.length,
-		};
+	const pinned = options.maxToolArgsChars !== undefined || options.maxToolResultChars !== undefined || options.maxTextChars !== undefined;
+	const base = { ...DEFAULTS, ...stripUndefined(options), budgetTokens: options.budgetTokens };
+	const tiers: Caps[] = pinned ? [{ maxToolArgsChars: base.maxToolArgsChars, maxToolResultChars: base.maxToolResultChars, maxTextChars: base.maxTextChars }] : [...TIERS];
+	let opts = { ...base, ...tiers[0] };
+	let rendered: string[] = [];
+	let sizes: number[] = [];
+	let total = 0;
+	for (const tier of tiers) {
+		opts = { ...base, ...tier };
+		rendered = entries.map((entry) => renderEntry(entry, opts).map(redact).join("\n\n")).filter((text) => text.length > 0);
+		sizes = rendered.map(estimateTokens);
+		total = sizes.reduce((a, b) => a + b, 0);
+		if (total <= opts.budgetTokens) {
+			return {
+				messages: rendered.map((content) => ({ role: "user", content })),
+				tokens: total,
+				elidedEntries: 0,
+				totalEntries: rendered.length,
+				maxToolResultChars: opts.maxToolResultChars,
+			};
+		}
 	}
 
 	const headBudget = Math.floor(opts.budgetTokens * opts.headFraction);
@@ -239,5 +269,10 @@ export function serializeTranscript(entries: EntryLike[], options: SerializeOpti
 		tokens: messages.reduce((a, m) => a + estimateTokens(m.content), 0),
 		elidedEntries: Math.max(0, elided),
 		totalEntries: rendered.length,
+		maxToolResultChars: opts.maxToolResultChars,
 	};
+}
+
+function stripUndefined<T extends object>(o: T): Partial<T> {
+	return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
 }

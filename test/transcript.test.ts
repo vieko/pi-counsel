@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { estimateTokens, redact, renderEntry, serializeTranscript } from "../extensions/pi-counsel/transcript.ts";
+import { estimateTokens, redact, renderEntry, serializeTranscript, TIERS } from "../extensions/pi-counsel/transcript.ts";
 
 const opts = { skipToolCalls: [] as string[], maxToolArgsChars: 1_500, maxToolResultChars: 3_000, maxTextChars: 12_000, headFraction: 0.25 };
 
@@ -115,6 +115,29 @@ describe("serializeTranscript", () => {
 			out.messages.map((m) => m.content),
 			["[assistant]\nasking\n\n[tool call: read]\n{}", "[tool result: counsel]\nearlier advice"],
 		);
+	});
+
+	it("reads large tool results whole when the budget allows", () => {
+		const big = `START${"x".repeat(40_000)}END`;
+		const out = serializeTranscript([user("task"), toolResult("read", big)], { budgetTokens: 50_000 });
+		assert.equal(out.maxToolResultChars, TIERS[0].maxToolResultChars);
+		assert.ok(out.messages[1].content.includes(big));
+	});
+
+	it("steps down clip tiers before eliding entries", () => {
+		const entries: Entry[] = [user("task")];
+		for (let i = 0; i < 10; i++) entries.push(toolResult("read", `${i}:${"z".repeat(30_000)}`));
+		// Tier 0 needs ~75K tokens, tier 1 (20K chars) ~50K, tier 2 (8K chars) ~20K.
+		const out = serializeTranscript(entries, { budgetTokens: 25_000 });
+		assert.equal(out.elidedEntries, 0);
+		assert.equal(out.maxToolResultChars, 8_000);
+		assert.ok(out.tokens <= 25_000);
+	});
+
+	it("pins one tier when a cap is passed", () => {
+		const out = serializeTranscript([toolResult("read", "w".repeat(10_000))], { budgetTokens: 50_000, maxToolResultChars: 3_000 });
+		assert.equal(out.maxToolResultChars, 3_000);
+		assert.ok(out.messages[0].content.includes("chars elided"));
 	});
 
 	it("redacts inside entries", () => {

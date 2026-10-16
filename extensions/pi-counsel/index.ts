@@ -21,7 +21,7 @@ import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { consult, CounselError, resolveCounselModel, TOOL_NAME, type ConsultProgress } from "./consult.ts";
 import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.ts";
-import { type CounselSettings, type Effort, EFFORTS, loadFileSettings, loadSettings, modelKey, parseEnvOverride, parseModelRef, saveSettings, SETTINGS_PATH } from "./settings.ts";
+import { type CounselSettings, type Effort, EFFORTS, loadFileSettings, loadSettings, modelFamily, modelKey, parseEnvOverride, parseModelRef, saveSettings, sessionNote, SETTINGS_PATH, withModelOverride } from "./settings.ts";
 
 const BUDGET_ENTRY = "counsel_budget";
 const RECORD_ENTRY = "counsel";
@@ -36,6 +36,8 @@ export interface CounselDetails {
 	transcriptTokens: number;
 	elidedEntries: number;
 	totalEntries: number;
+	/** Per-tool-result clip the transcript used, in characters. */
+	clipChars?: number;
 	truncated: boolean;
 	sameModelAsSession: boolean;
 	budget: Budget;
@@ -60,6 +62,25 @@ const money = (n: number): string => `$${n.toFixed(n >= 10 ? 0 : n >= 1 ? 2 : 3)
 const seconds = (ms: number): string => `${Math.round(ms / 1000)}s`;
 const kilo = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K` : String(n));
 const firstLine = (text: string): string => text.split("\n").find((l) => l.trim())?.replace(/^\*\*Verdict:\*\*\s*/i, "").trim() ?? "";
+
+/**
+ * Models with credentials from the requested family, for a `model` argument
+ * that did not resolve. Scoped models come first: they are the user's own
+ * shortlist. The rest sort by descending id so newer versions lead.
+ */
+function suggestModels(ctx: Pick<ExtensionContext, "modelRegistry" | "scopedModels">, wanted: Pick<CounselSettings, "provider" | "model">): string {
+	const family = modelFamily(wanted.provider, wanted.model);
+	const fits = (m: Model<Api>) => ctx.modelRegistry.hasConfiguredAuth(m) && (family ? modelFamily(m.provider, m.id) === family : m.provider === wanted.provider);
+	const key = (m: Model<Api>) => `${m.provider}/${m.id}`;
+	const scoped = ctx.scopedModels.map((s) => s.model).filter(fits).map(key);
+	const rest = ctx.modelRegistry
+		.getAvailable()
+		.filter(fits)
+		.map(key)
+		.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+	const hits = [...new Set([...scoped, ...rest])].slice(0, 12);
+	return hits.length ? `. Available: ${hits.join(", ")}` : "";
+}
 
 /** Sum this session's consults from the branch, plus any grants. */
 function readBudget(ctx: Pick<ExtensionContext, "sessionManager">, settings: CounselSettings): Budget {
@@ -113,9 +134,11 @@ export default function counselExtension(pi: ExtensionAPI) {
 		async execute(_id, params, signal, onUpdate, ctx) {
 			const question = params.question?.trim() || undefined;
 			const budget = readBudget(ctx, settings);
+			const picked = withModelOverride(settings, params.model);
+			const effective = "error" in picked ? settings : picked;
 			const base: CounselDetails = {
-				model: modelKey(settings),
-				effort: settings.effort,
+				model: modelKey(effective),
+				effort: effective.effort,
 				question,
 				durationMs: 0,
 				cost: 0,
@@ -136,16 +159,21 @@ export default function counselExtension(pi: ExtensionAPI) {
 			if (!settings.enabled) return fail("counsel is off. Ask the user to run /counsel on if a consultation is wanted.");
 			const blocked = overBudget(budget);
 			if (blocked) return fail(`${blocked}. Continue with your own judgement, or ask the user to run /counsel more.`);
+			if ("error" in picked) return fail(picked.error);
 
 			let outcome;
 			try {
-				outcome = await consult(ctx, settings, question, signal, (p) => {
+				outcome = await consult(ctx, effective, question, signal, (p) => {
 					onUpdate?.({
-						content: [{ type: "text", text: `consulting ${modelKey(settings)}… ${seconds(p.elapsedMs)}` }],
+						content: [{ type: "text", text: `consulting ${modelKey(effective)}… ${seconds(p.elapsedMs)}` }],
 						details: { ...base, durationMs: p.elapsedMs, phase: p.phase },
 					});
 				});
 			} catch (err) {
+				if (err instanceof CounselError && effective !== settings && (err.kind === "no-model" || err.kind === "no-auth")) {
+					const why = err.kind === "no-model" ? "is not in the model registry" : "has no configured credentials";
+					return fail(`${modelKey(effective)} ${why}; pass another model or leave model empty for the configured counsel${suggestModels(ctx, effective)}`);
+				}
 				if (err instanceof CounselError) return fail(err.message);
 				return fail(`counsel failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -161,6 +189,7 @@ export default function counselExtension(pi: ExtensionAPI) {
 				transcriptTokens: outcome.transcriptTokens,
 				elidedEntries: outcome.elidedEntries,
 				totalEntries: outcome.totalEntries,
+				clipChars: outcome.clipChars,
 				truncated: outcome.truncated,
 				sameModelAsSession: outcome.sameModelAsSession,
 				budget: { ...budget, consults: budget.consults + 1, spend: budget.spend + (usage?.cost.total ?? 0) },
@@ -174,19 +203,24 @@ export default function counselExtension(pi: ExtensionAPI) {
 				durationMs: details.durationMs,
 				transcriptTokens: details.transcriptTokens,
 				elidedEntries: details.elidedEntries,
+				clipChars: details.clipChars,
 				truncated: details.truncated,
 				verdict: firstLine(outcome.advice),
 			});
 
-			const notes: string[] = [];
+			// The executor reports which model reviewed; without this line it had
+			// to dig the details out of its own session file.
+			const notes: string[] = [
+				`[counsel: ${details.model} · ${details.effort} · ${seconds(details.durationMs)} · ${money(details.cost)} · read ${kilo(details.transcriptTokens)} transcript tokens]`,
+			];
 			if (outcome.truncated) notes.push("[counsel hit its output cap; the advice above may be incomplete]");
 			if (outcome.elidedEntries > 0) notes.push(`[${outcome.elidedEntries} of ${outcome.totalEntries} transcript entries were elided from the middle to fit counsel's context]`);
-			const text = notes.length ? `${outcome.advice}\n\n${notes.join("\n")}` : outcome.advice;
+			const text = `${outcome.advice}\n\n${notes.join("\n")}`;
 
 			return { content: [{ type: "text", text }], details, usage };
 		},
 		renderCall(args, theme) {
-			let line = theme.fg("toolTitle", theme.bold("counsel ")) + theme.fg("muted", modelKey(settings));
+			let line = theme.fg("toolTitle", theme.bold("counsel ")) + theme.fg("muted", args.model?.trim() || modelKey(settings));
 			if (args.question) line += ` ${theme.fg("dim", `"${args.question}"`)}`;
 			return new Text(line, 0, 0);
 		},
@@ -270,7 +304,8 @@ export default function counselExtension(pi: ExtensionAPI) {
 			} catch (err) {
 				parts.push(err instanceof Error ? err.message : String(err));
 			}
-			if (ctx.model && ctx.model.provider === settings.provider && ctx.model.id === settings.model) parts.push("same model as the session: a fresh read, not a stronger one");
+			const note = sessionNote(ctx.model, settings);
+			if (note) parts.push(note);
 		}
 		if (envOverride?.kind === "model") parts.push("model set by PI_COUNSEL for this process");
 		return `counsel: ${parts.join(" · ")}`;
@@ -383,4 +418,10 @@ export default function counselExtension(pi: ExtensionAPI) {
 
 const Params = Type.Object({
 	question: Type.Optional(Type.String({ description: "Optional focus for the reading. Leave empty for a general review of the approach and current state." })),
+	model: Type.Optional(
+		Type.String({
+			description:
+				"Optional provider/model[:effort] for this consult only, e.g. vercel-ai-gateway/openai/<model>:high. Use it only when the user names a model or asks for a reviewer from a different model family. Leave empty for the configured counsel.",
+		}),
+	),
 });

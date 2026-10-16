@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_SETTINGS, parseEnvOverride, parseModelRef, parseSettings } from "../extensions/pi-counsel/settings.ts";
+import { DEFAULT_SETTINGS, modelFamily, parseEnvOverride, parseModelRef, parseSettings, sessionNote, withModelOverride } from "../extensions/pi-counsel/settings.ts";
 
 describe("parseSettings", () => {
 	it("falls back per field", () => {
@@ -53,5 +53,61 @@ describe("parseEnvOverride", () => {
 		assert.equal(parseEnvOverride(""), undefined);
 		assert.deepEqual(parseEnvOverride("anthropic/claude-opus-5.5:max"), { kind: "model", provider: "anthropic", model: "claude-opus-5.5", effort: "max" });
 		assert.equal(parseEnvOverride("nonsense"), undefined);
+	});
+});
+
+describe("modelFamily", () => {
+	it("reads the vendor from gateway ids and direct providers", () => {
+		assert.equal(modelFamily("vercel-ai-gateway", "anthropic/claude-fable-5.1"), "anthropic");
+		assert.equal(modelFamily("anthropic", "claude-opus-5.5"), "anthropic");
+		assert.equal(modelFamily("vercel-ai-gateway", "openai/gpt-6.1-sol"), "openai");
+		assert.equal(modelFamily("openai", "o4-mini"), "openai");
+		assert.equal(modelFamily("google-vertex", "claude-opus-5.5"), "anthropic");
+		assert.equal(modelFamily("openrouter", "google/gemini-3-pro"), "google");
+	});
+
+	it("returns undefined when nothing matches", () => {
+		assert.equal(modelFamily("local", "my-finetune"), undefined);
+	});
+});
+
+describe("sessionNote", () => {
+	const fable = { provider: "vercel-ai-gateway", model: "anthropic/claude-fable-5.1" };
+
+	it("flags the same model", () => {
+		assert.match(sessionNote({ provider: fable.provider, id: fable.model }, fable) ?? "", /same model/);
+	});
+
+	it("flags the same family", () => {
+		assert.match(sessionNote({ provider: "vercel-ai-gateway", id: "anthropic/claude-opus-5.5" }, fable) ?? "", /same family as the session \(anthropic\)/);
+	});
+
+	it("says nothing across families or without a session model", () => {
+		assert.equal(sessionNote({ provider: "vercel-ai-gateway", id: "openai/gpt-6.1-sol" }, fable), undefined);
+		assert.equal(sessionNote(undefined, fable), undefined);
+		assert.equal(sessionNote({ provider: "local", id: "my-finetune" }, { provider: "local", model: "other" }), undefined);
+	});
+});
+
+describe("withModelOverride", () => {
+	it("keeps the settings when no model is given", () => {
+		assert.equal(withModelOverride(DEFAULT_SETTINGS, undefined), DEFAULT_SETTINGS);
+		assert.equal(withModelOverride(DEFAULT_SETTINGS, "  "), DEFAULT_SETTINGS);
+	});
+
+	it("swaps the model and keeps the configured effort unless given", () => {
+		const s = withModelOverride({ ...DEFAULT_SETTINGS, effort: "medium" }, "vercel-ai-gateway/openai/gpt-6.1-sol");
+		assert.ok(!("error" in s));
+		assert.equal(s.provider, "vercel-ai-gateway");
+		assert.equal(s.model, "openai/gpt-6.1-sol");
+		assert.equal(s.effort, "medium");
+		assert.equal(s.maxTokens, DEFAULT_SETTINGS.maxTokens);
+		const t = withModelOverride(DEFAULT_SETTINGS, "openai/gpt-6.1-sol:xhigh");
+		assert.ok(!("error" in t));
+		assert.equal(t.effort, "xhigh");
+	});
+
+	it("rejects a ref without a provider", () => {
+		assert.ok("error" in withModelOverride(DEFAULT_SETTINGS, "gpt-6.1-sol"));
 	});
 });
