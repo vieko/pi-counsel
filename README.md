@@ -52,7 +52,11 @@ result and the executor decides what to adopt.
 | `/counsel more` | Raise this session's budget by one more allowance |
 
 In a prompt, "consult counsel before you continue" works the way it does with
-any tool.
+any tool. The tool also takes an optional `model` (`provider/model[:effort]`)
+for one consult, so "have counsel review with an OpenAI model" works without
+changing the configured counsel. That consult counts against the same budget.
+If the model does not resolve, the error lists available models from the
+same family.
 
 ## Configure
 
@@ -99,7 +103,7 @@ declines and tells the agent to carry on with its own judgement, and
   Opus) shares its training and its blind spots, and models tend to rate
   their own family's work higher. A comparably strong model from another
   lab is more likely to disagree where the executor is wrong. `/counsel
-  status` notes a same-family pair. The cost is privacy: the transcript
+  status` notes a same-family pair; pass `model` for one cross-family consult. The cost is privacy: the transcript
   then goes to a second provider. A weaker cross-family model adds noise,
   not independence.
 - **Routing.** Requests go through `modelRegistry.streamSimple()`, outside
