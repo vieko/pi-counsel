@@ -49,6 +49,8 @@ export interface ConsultOutcome {
 	transcriptTokens: number;
 	elidedEntries: number;
 	totalEntries: number;
+	/** Per-tool-result clip the transcript used, in characters. */
+	clipChars: number;
 	sameModelAsSession: boolean;
 }
 
@@ -168,6 +170,7 @@ export async function consult(
 		transcriptTokens: transcript.tokens,
 		elidedEntries: transcript.elidedEntries,
 		totalEntries: transcript.totalEntries,
+		clipChars: transcript.maxToolResultChars,
 		sameModelAsSession: ctx.model?.provider === model.provider && ctx.model?.id === model.id,
 	};
 }

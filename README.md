@@ -28,13 +28,17 @@ an approach has stalled after two attempts, before declaring multi-step work
 done, or when the user asks. Not for routine steps.
 
 A consult serialises the session (compaction summary, user messages,
-assistant text, tool calls with clipped arguments, tool results with clipped
-bodies, images as placeholders) into one message per entry, redacts obvious
-secrets, sizes it to the counsel model's context window (eliding the middle,
-keeping the opening and the recent tail), and streams the answer. The tool
-result carries the counsel model's usage, so `/session` and the footer
-include it; a `counsel` session entry records model, cost, duration and the
-verdict line for later analysis.
+assistant text, tool calls and their arguments, tool results, images as
+placeholders) into one message per entry, redacts obvious secrets, and sizes
+it to the counsel model's context window. Sizing uses the loosest clip that
+fits: a session that fits is read nearly whole (tool results up to 50K
+characters each), and long ones step down to 20K, 8K, then 3K per result
+before entries are elided from the middle, keeping the opening and the
+recent tail. The answer streams back with a last line naming the model,
+effort, duration, cost and transcript size. The tool result carries the
+counsel model's usage, so `/session` and the footer include it; a `counsel`
+session entry records model, cost, duration, the clip used and the verdict
+line for later analysis.
 
 Counsel has no tools and takes no actions. Its advice comes back as the tool
 result and the executor decides what to adopt.
@@ -90,8 +94,9 @@ declines and tells the agent to carry on with its own judgement, and
 - **Cost.** Each consult reads the transcript at the counsel model's price;
   at 200K tokens on a frontier model that is a few dollars. The result line
   shows tokens, dollars, cache hit rate, and budget used. Consecutive
-  consults share a byte-identical prefix, so a provider prompt cache can
-  reuse most of it.
+  consults share a byte-identical prefix while the clip tier holds, so a
+  provider prompt cache can reuse most of it; the prefix changes once when
+  a growing session drops to a tighter tier.
 - **Privacy.** The transcript goes to the counsel model's provider. When
   that is the same provider as the session, nothing new is exposed. Redaction
   (API-key shapes, bearer tokens, `KEY=`/`TOKEN=` assignments, credentials

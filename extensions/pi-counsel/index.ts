@@ -36,6 +36,8 @@ export interface CounselDetails {
 	transcriptTokens: number;
 	elidedEntries: number;
 	totalEntries: number;
+	/** Per-tool-result clip the transcript used, in characters. */
+	clipChars?: number;
 	truncated: boolean;
 	sameModelAsSession: boolean;
 	budget: Budget;
@@ -187,6 +189,7 @@ export default function counselExtension(pi: ExtensionAPI) {
 				transcriptTokens: outcome.transcriptTokens,
 				elidedEntries: outcome.elidedEntries,
 				totalEntries: outcome.totalEntries,
+				clipChars: outcome.clipChars,
 				truncated: outcome.truncated,
 				sameModelAsSession: outcome.sameModelAsSession,
 				budget: { ...budget, consults: budget.consults + 1, spend: budget.spend + (usage?.cost.total ?? 0) },
@@ -200,14 +203,19 @@ export default function counselExtension(pi: ExtensionAPI) {
 				durationMs: details.durationMs,
 				transcriptTokens: details.transcriptTokens,
 				elidedEntries: details.elidedEntries,
+				clipChars: details.clipChars,
 				truncated: details.truncated,
 				verdict: firstLine(outcome.advice),
 			});
 
-			const notes: string[] = [];
+			// The executor reports which model reviewed; without this line it had
+			// to dig the details out of its own session file.
+			const notes: string[] = [
+				`[counsel: ${details.model} · ${details.effort} · ${seconds(details.durationMs)} · ${money(details.cost)} · read ${kilo(details.transcriptTokens)} transcript tokens]`,
+			];
 			if (outcome.truncated) notes.push("[counsel hit its output cap; the advice above may be incomplete]");
 			if (outcome.elidedEntries > 0) notes.push(`[${outcome.elidedEntries} of ${outcome.totalEntries} transcript entries were elided from the middle to fit counsel's context]`);
-			const text = notes.length ? `${outcome.advice}\n\n${notes.join("\n")}` : outcome.advice;
+			const text = `${outcome.advice}\n\n${notes.join("\n")}`;
 
 			return { content: [{ type: "text", text }], details, usage };
 		},
