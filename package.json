@@ -1,6 +1,6 @@
 {
   "name": "pi-counsel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Give your Pi agent a counsel tool: a stronger model it consults before committing to an approach, when stuck, or before declaring done.",
   "keywords": [
     "pi-package",
