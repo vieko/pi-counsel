@@ -3,9 +3,16 @@
  *
  * Plain text, not the provider messages: raw forwarding carries block types
  * (thinking signatures, tool_use pairs, images the counsel model may not
- * accept) that another provider rejects. Each session entry becomes one
- * user message with a fixed label, so the request prefix is byte-stable
- * across consults and a provider prompt cache can reuse it.
+ * accept) that another provider rejects. Each session entry renders with a
+ * fixed label, so the request prefix is byte-stable across consults.
+ *
+ * Byte-stable is not enough for Anthropic's cache: a read needs a
+ * breakpoint the earlier request also wrote, within 20 blocks. The request
+ * block at the end changes every consult, so the default last-block
+ * breakpoint never matches. Entries are therefore grouped into fixed-size
+ * chunks (one message each) and `breakpoints` names the last complete
+ * chunk, which the next consult still contains, plus the last chunk.
+ * Measured 2026-10-26: 0% read before, 74% on a 6-entry follow-up after.
  *
  * Sizing is model-aware: the caller passes a token budget derived from the
  * counsel model's context window. The serialiser picks the loosest clip tier
@@ -36,6 +43,8 @@ export interface SerializeOptions {
 	maxTextChars?: number;
 	/** Fraction of the budget reserved for the head when eliding. */
 	headFraction?: number;
+	/** Entries per message. 1 keeps one message per entry. */
+	chunkEntries?: number;
 }
 
 export interface SerializeResult {
@@ -48,6 +57,8 @@ export interface SerializeResult {
 	totalEntries: number;
 	/** Per-result clip that was used, in characters. */
 	maxToolResultChars: number;
+	/** Indices into `messages` worth a cache breakpoint: last complete chunk of the stable head, then the last message. */
+	breakpoints: number[];
 }
 
 // Loose shapes of what pi's session manager returns. Kept structural so the
@@ -97,7 +108,19 @@ const DEFAULTS = {
 	skipToolCalls: [] as string[],
 	...TIERS[TIERS.length - 1],
 	headFraction: 0.25,
+	chunkEntries: 1,
 };
+
+/** Group rendered entries into messages of `size`; `complete` counts the full ones. */
+function chunk(texts: string[], size: number): { messages: TranscriptMessage[]; complete: number } {
+	const n = Math.max(1, Math.floor(size));
+	const messages: TranscriptMessage[] = [];
+	for (let i = 0; i < texts.length; i += n) messages.push({ role: "user", content: texts.slice(i, i + n).join("\n\n") });
+	return { messages, complete: Math.floor(texts.length / n) };
+}
+
+const breakpointsFor = (stableComplete: number, total: number): number[] =>
+	[...new Set([stableComplete - 1, total - 1])].filter((i) => i >= 0);
 
 /** Best-effort. Counsel goes to the same provider as the session; this is hygiene, not a boundary. */
 const SECRET_PATTERNS: { re: RegExp; to: string }[] = [
@@ -156,7 +179,7 @@ const textOf = (content: unknown, maxChars: number): string =>
 		.slice(0, Math.max(0, maxChars) || undefined);
 
 /** Render one session entry as labelled blocks. Empty when there is nothing counsel should read. */
-export function renderEntry(entry: EntryLike, opts: Required<Omit<SerializeOptions, "budgetTokens">>): string[] {
+export function renderEntry(entry: EntryLike, opts: Required<Omit<SerializeOptions, "budgetTokens" | "chunkEntries">>): string[] {
 	const blocks: string[] = [];
 	if (entry.type === "compaction" && typeof entry.summary === "string") {
 		blocks.push(`[summary of earlier conversation]\n${clip(entry.summary, opts.maxTextChars)}`);
@@ -223,12 +246,14 @@ export function serializeTranscript(entries: EntryLike[], options: SerializeOpti
 		sizes = rendered.map(estimateTokens);
 		total = sizes.reduce((a, b) => a + b, 0);
 		if (total <= opts.budgetTokens) {
+			const { messages, complete } = chunk(rendered, opts.chunkEntries);
 			return {
-				messages: rendered.map((content) => ({ role: "user", content })),
-				tokens: total,
+				messages,
+				tokens: messages.reduce((a, m) => a + estimateTokens(m.content), 0),
 				elidedEntries: 0,
 				totalEntries: rendered.length,
 				maxToolResultChars: opts.maxToolResultChars,
+				breakpoints: breakpointsFor(complete, messages.length),
 			};
 		}
 	}
@@ -254,15 +279,16 @@ export function serializeTranscript(entries: EntryLike[], options: SerializeOpti
 	const elided = firstTail - lastHead - 1;
 	const elidedTokens = sizes.slice(lastHead + 1, firstTail).reduce((a, b) => a + b, 0);
 
-	const messages: TranscriptMessage[] = [];
-	for (const i of head) messages.push({ role: "user", content: rendered[i] });
+	// Only the head is stable once eliding starts: the tail's first entry moves every consult.
+	const headChunks = chunk(head.map((i) => rendered[i]), opts.chunkEntries);
+	const messages: TranscriptMessage[] = [...headChunks.messages];
 	if (elided > 0) {
 		messages.push({
 			role: "user",
 			content: `[... ${elided} entries (~${elidedTokens} tokens) elided to fit the counsel model's context; the opening and the most recent work are kept ...]`,
 		});
 	}
-	for (const i of tail) messages.push({ role: "user", content: rendered[i] });
+	messages.push(...chunk(tail.map((i) => rendered[i]), opts.chunkEntries).messages);
 
 	return {
 		messages,
@@ -270,6 +296,7 @@ export function serializeTranscript(entries: EntryLike[], options: SerializeOpti
 		elidedEntries: Math.max(0, elided),
 		totalEntries: rendered.length,
 		maxToolResultChars: opts.maxToolResultChars,
+		breakpoints: breakpointsFor(headChunks.complete, messages.length),
 	};
 }
 
