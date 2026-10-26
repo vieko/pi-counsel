@@ -140,6 +140,35 @@ describe("serializeTranscript", () => {
 		assert.ok(out.messages[0].content.includes("chars elided"));
 	});
 
+	it("groups entries into chunks and marks the last complete chunk and the last message", () => {
+		const entries: Entry[] = Array.from({ length: 37 }, (_, i) => toolResult("bash", `out ${i}`));
+		const out = serializeTranscript(entries, { budgetTokens: 10_000, chunkEntries: 16 });
+		assert.equal(out.messages.length, 3);
+		assert.equal(out.totalEntries, 37);
+		assert.ok(out.messages[0].content.startsWith("[tool result: bash]\nout 0\n\n[tool result: bash]\nout 1"));
+		assert.deepEqual(out.breakpoints, [1, 2]);
+		assert.equal(serializeTranscript(entries.slice(0, 32), { budgetTokens: 10_000, chunkEntries: 16 }).breakpoints.join(), "1");
+		assert.equal(serializeTranscript(entries.slice(0, 5), { budgetTokens: 10_000, chunkEntries: 16 }).breakpoints.join(), "0");
+	});
+
+	it("keeps complete chunks byte-identical as the session grows", () => {
+		const entries: Entry[] = Array.from({ length: 80 }, (_, i) => toolResult("bash", `out ${i}`));
+		const a = serializeTranscript(entries.slice(0, 40), { budgetTokens: 10_000, chunkEntries: 16 });
+		const b = serializeTranscript(entries, { budgetTokens: 10_000, chunkEntries: 16 });
+		const stable = a.breakpoints[0];
+		assert.deepEqual(b.messages.slice(0, stable + 1), a.messages.slice(0, stable + 1));
+	});
+
+	it("puts the stable breakpoint in the head when eliding", () => {
+		const entries: Entry[] = [user("the task")];
+		for (let i = 0; i < 200; i++) entries.push(toolResult("bash", `${i}:${"y".repeat(400)}`));
+		const out = serializeTranscript(entries, { budgetTokens: 20_000, chunkEntries: 4 });
+		assert.ok(out.elidedEntries > 0);
+		const marker = out.messages.findIndex((m) => m.content.startsWith("[..."));
+		assert.ok(out.breakpoints[0] < marker, `breakpoints ${out.breakpoints} marker ${marker}`);
+		assert.equal(out.breakpoints.at(-1), out.messages.length - 1);
+	});
+
 	it("redacts inside entries", () => {
 		const out = serializeTranscript([toolResult("bash", "TOKEN=abcdef123456")], { budgetTokens: 1_000 });
 		assert.equal(out.messages[0].content, "[tool result: bash]\nTOKEN=[redacted]");

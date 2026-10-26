@@ -94,9 +94,12 @@ declines and tells the agent to carry on with its own judgement, and
 - **Cost.** Each consult reads the transcript at the counsel model's price;
   at 200K tokens on a frontier model that is a few dollars. The result line
   shows tokens, dollars, cache hit rate, and budget used. Consecutive
-  consults share a byte-identical prefix while the clip tier holds, so a
-  provider prompt cache can reuse most of it; the prefix changes once when
-  a growing session drops to a tighter tier.
+  consults share a byte-identical prefix while the clip tier holds. On
+  Anthropic models the transcript goes out in 16-entry chunks with cache
+  breakpoints on the last complete chunk and the last chunk, so a follow-up
+  consult within the cache TTL (5 minutes) reads most of it from cache
+  instead of paying full price again. The prefix changes once when a
+  growing session drops to a tighter tier.
 - **Privacy.** The transcript goes to the counsel model's provider. When
   that is the same provider as the session, nothing new is exposed. Redaction
   (API-key shapes, bearer tokens, `KEY=`/`TOKEN=` assignments, credentials
