@@ -1,8 +1,8 @@
 # pi-counsel
 
 Give your [Pi](https://pi.dev) agent a `counsel` tool: a stronger model it
-consults before committing to an approach, when stuck, or before declaring
-done. The executor keeps the work. Counsel reads a plain-text transcript of
+consults before committing to an approach, before offering you a choice of
+approaches, when stuck, or before declaring done. The executor keeps the work. Counsel reads a plain-text transcript of
 the session and returns a verdict, the risks it sees, numbered next steps,
 and what to verify.
 
