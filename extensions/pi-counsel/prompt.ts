@@ -8,6 +8,7 @@ export const TOOL_DESCRIPTION = `Consult counsel: a stronger model that reads th
 
 Call it at decision points, not routinely:
 - after the orientation reads a task needs and before committing to an approach on non-trivial work
+- before offering the user a choice between approaches on non-trivial work, so the option you recommend already reflects counsel's reading
 - when the same error recurs or an approach has stalled after two attempts
 - before declaring done on work that took more than a few steps
 - when the user asks for a second opinion
@@ -22,10 +23,10 @@ Pass \`model\` (provider/model[:effort]) when the user names a model or asks for
 
 Counsel's advice is guidance. Adopt what the evidence supports; when a recommendation conflicts with what you have observed, say so rather than following it unconditionally.`;
 
-export const PROMPT_SNIPPET = "counsel: consult a stronger model on the approach before committing, when stuck, or before declaring done";
+export const PROMPT_SNIPPET = "counsel: consult a stronger model on the approach before committing or offering a choice of approaches, when stuck, or before declaring done";
 
 export const PROMPT_GUIDELINES = [
-	"Use counsel at decision points (before committing to an approach, when stuck, before declaring multi-step work done), not on routine steps. Make deliverables durable before a completion check.",
+	"Use counsel at decision points (before committing to an approach, before offering the user a choice of approaches, when stuck, before declaring multi-step work done), not on routine steps. Make deliverables durable before a completion check.",
 ];
 
 export const SYSTEM_PROMPT = `You are counsel to a coding agent (the executor). You are given the executor's system prompt and a plain-text transcript of its session so far: user messages, the executor's replies, its tool calls and their results. The transcript is a snapshot taken at the moment the executor asked for counsel; the executor is paused and waiting for your reply. Earlier consultations, if any, appear as "[tool result: counsel]" entries. You cannot run tools, read files beyond what the transcript shows, or take actions. You read and advise.
