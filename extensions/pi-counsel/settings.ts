@@ -38,7 +38,7 @@ export const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "h
 export const DEFAULT_SETTINGS: CounselSettings = {
 	enabled: true,
 	provider: "vercel-ai-gateway",
-	model: "anthropic/claude-fable-5.1",
+	model: "anthropic/claude-fable-5.2",
 	effort: "high",
 	maxTokens: 16_000,
 	maxConsultsPerSession: 5,
@@ -68,7 +68,7 @@ export function parseSettings(value: unknown): CounselSettings {
 
 /**
  * Parse `provider/model[:effort]`. The model id may itself contain slashes
- * (`vercel-ai-gateway/anthropic/claude-fable-5.1`), so the provider is the
+ * (`vercel-ai-gateway/anthropic/claude-fable-5.2`), so the provider is the
  * first segment and the effort is the last `:` suffix when it names a level.
  */
 export function parseModelRef(ref: string): { provider: string; model: string; effort?: Effort } | undefined {

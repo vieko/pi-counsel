@@ -70,7 +70,7 @@ same family.
 {
   "enabled": true,
   "provider": "vercel-ai-gateway",
-  "model": "anthropic/claude-fable-5.1",
+  "model": "anthropic/claude-fable-5.2",
   "effort": "high",
   "maxTokens": 16000,
   "maxConsultsPerSession": 5,

@@ -7,7 +7,7 @@ import { CounselError } from "../extensions/pi-counsel/consult.ts";
 
 const model = (over: Partial<Model<Api>> = {}): Model<Api> =>
 	({
-		id: "anthropic/claude-fable-5.1",
+		id: "anthropic/claude-fable-5.2",
 		name: "fable",
 		api: "anthropic-messages",
 		provider: "vercel-ai-gateway",
@@ -58,7 +58,7 @@ describe("resolveCounselModel", () => {
 	});
 
 	it("returns the model when found and authenticated", () => {
-		assert.equal(resolveCounselModel(registry(model(), true), DEFAULT_SETTINGS).id, "anthropic/claude-fable-5.1");
+		assert.equal(resolveCounselModel(registry(model(), true), DEFAULT_SETTINGS).id, "anthropic/claude-fable-5.2");
 	});
 });
 
